@@ -61,8 +61,20 @@ if not os.path.exists(f"{DATA_DIR}/train.csv"):
 
 train = pd.read_csv(f"{DATA_DIR}/train.csv")
 test = pd.read_csv(f"{DATA_DIR}/test.csv")
+sample_sub = pd.read_csv(f"{DATA_DIR}/sample_submission.csv")
 
-print(f"train: {train.shape}, test: {test.shape}")
+print(f"train: {train.shape}, test: {test.shape}, "
+      f"sample_submission: {sample_sub.shape}")
+
+# PENTING: Kaggle menolak submission kalau jumlah baris tidak sama persis
+# dengan sample_submission. Kalau angka di bawah ini berbeda, berarti
+# dataset lokal SUDAH KADALUARSA -> download ulang test.csv &
+# sample_submission.csv terbaru dari tab Data di Kaggle.
+if len(test) != len(sample_sub):
+    print("\n[!!] PERINGATAN: jumlah baris test.csv "
+          f"({len(test)}) != sample_submission.csv ({len(sample_sub)}).")
+    print("[!!] Dataset lokal kemungkinan versi lama. Download ulang "
+          "dataset TERBARU dari Kaggle sebelum submit.\n")
 
 
 # ---------------------------------------------------------------------------
@@ -252,9 +264,28 @@ print(f"Distribusi prediksi test -> label 0: {(test_pred == 0).sum()}, "
 # ---------------------------------------------------------------------------
 # 8. Simpan submission.csv
 # ---------------------------------------------------------------------------
-submission = pd.DataFrame({"id": test["id"], "label": test_pred})
+# Bangun submission mengikuti KOLOM id dari sample_submission supaya jumlah
+# baris & urutannya PERSIS sama dengan yang diharapkan Kaggle. Prediksi
+# dipetakan berdasarkan id (bukan sekadar urutan baris) agar aman.
+pred_by_id = dict(zip(test["id"].values, test_pred))
+sub_labels = sample_sub["id"].map(pred_by_id)
+
+# Kalau ada id di sample_submission yang tidak ada di test.csv (tanda dataset
+# lokal kadaluarsa), map -> NaN. Isi sementara dengan kelas mayoritas (1)
+# hanya agar file valid, TAPI ini bukan solusi -> harus download data terbaru.
+n_missing = int(sub_labels.isna().sum())
+if n_missing > 0:
+    print(f"\n[!!] {n_missing} id di sample_submission tidak ada di test.csv "
+          "lokal -> diisi label mayoritas (1) sebagai penambal sementara.")
+    print("[!!] Ini TIDAK akan akurat. Download test.csv terbaru dari Kaggle.")
+    sub_labels = sub_labels.fillna(1)
+
+submission = pd.DataFrame({
+    "id": sample_sub["id"],
+    "label": sub_labels.astype(int),
+})
 submission.to_csv(OUT_PATH, index=False)
-print(f"\nSubmission tersimpan di: {OUT_PATH}")
+print(f"\nSubmission tersimpan di: {OUT_PATH} ({len(submission)} baris)")
 print(submission.head())
 
 # ---------------------------------------------------------------------------
