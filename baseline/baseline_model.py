@@ -41,27 +41,39 @@ from sklearn.preprocessing import StandardScaler
 SEED = 42
 np.random.seed(SEED)
 
-DATA_DIR = "data/penyisihan-dac-ifest-2026"
 OUT_PATH = "baseline/baseline_submission.csv"
 
 # ---------------------------------------------------------------------------
-# 1. Load data
+# 1. Load data (robust: cari CSV di mana pun, ekstrak zip bila perlu)
 # ---------------------------------------------------------------------------
-if not os.path.exists(f"{DATA_DIR}/train.csv"):
+def find_csv(name):
+    """Cari file CSV `name` secara rekursif di data/ lalu di root repo."""
+    hits = glob.glob(f"data/**/{name}", recursive=True) + \
+        glob.glob(f"**/{name}", recursive=True)
+    return hits[0] if hits else None
+
+
+# Kalau train.csv belum ada di mana pun, ekstrak zip dataset apa pun yang ada.
+if find_csv("train.csv") is None:
     zips = glob.glob("*.zip") + glob.glob("data/*.zip")
     if not zips:
         raise FileNotFoundError(
-            "train.csv tidak ditemukan dan tidak ada file .zip dataset Kaggle "
-            "di root repo. Unduh dataset dari Kaggle lalu taruh zip-nya di "
-            "root project, atau extract manual ke folder data/."
+            "train.csv tidak ditemukan dan tidak ada file .zip dataset Kaggle. "
+            "Unduh dataset TERBARU dari Kaggle lalu taruh zip-nya di root "
+            "project, atau extract manual ke folder data/."
         )
     print(f"Mengekstrak dataset dari {zips[0]} ...")
     with zipfile.ZipFile(zips[0]) as z:
         z.extractall("data")
 
-train = pd.read_csv(f"{DATA_DIR}/train.csv")
-test = pd.read_csv(f"{DATA_DIR}/test.csv")
-sample_sub = pd.read_csv(f"{DATA_DIR}/sample_submission.csv")
+train_path = find_csv("train.csv")
+test_path = find_csv("test.csv")
+sample_path = find_csv("sample_submission.csv")
+print(f"Memakai: {train_path} | {test_path} | {sample_path}")
+
+train = pd.read_csv(train_path)
+test = pd.read_csv(test_path)
+sample_sub = pd.read_csv(sample_path)
 
 print(f"train: {train.shape}, test: {test.shape}, "
       f"sample_submission: {sample_sub.shape}")
