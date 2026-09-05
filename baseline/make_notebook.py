@@ -78,7 +78,8 @@ Jalankan di **Google Colab** (Runtime → Change runtime type → **GPU T4**) at
 code(r"""
 # Colab/Kaggle SUDAH punya torch, numpy, pandas, scikit-learn yang kompatibel.
 # Cukup pasang transformers + accelerate. JANGAN reinstall/downgrade numpy/pandas.
-!pip -q install -U "transformers>=4.40" "accelerate>=0.30"
+# PENTING: pin transformers ke seri 4.x (versi 5.x mengubah API TrainingArguments).
+!pip -q install -U "transformers>=4.44,<5.0" "accelerate>=0.30"
 """)
 
 code(r"""
@@ -254,16 +255,19 @@ class WeightedTrainer(Trainer):
         loss = loss_fct(outputs.logits, labels)
         return (loss, outputs) if return_outputs else loss
 
+import inspect
+# nama & ketersediaan argumen TrainingArguments beda antar versi transformers.
+# Kita bangun kwargs lalu SARING hanya yang didukung versi terpasang -> anti-error.
+_TA_PARAMS = set(inspect.signature(TrainingArguments.__init__).parameters)
+
 def make_trainer(model, train_ds, val_ds, fold_tag):
-    args = TrainingArguments(
+    kw = dict(
         output_dir=f"out_{fold_tag}",
         num_train_epochs=EPOCHS,
         learning_rate=LR,
         per_device_train_batch_size=TRAIN_BS,
         per_device_eval_batch_size=EVAL_BS,
         weight_decay=WEIGHT_DECAY,
-        warmup_ratio=WARMUP_RATIO,
-        eval_strategy="epoch",
         save_strategy="epoch",
         load_best_model_at_end=True,
         metric_for_best_model="macro_f1",
@@ -274,11 +278,26 @@ def make_trainer(model, train_ds, val_ds, fold_tag):
         seed=SEED,
         save_total_limit=1,
     )
-    return WeightedTrainer(
-        model=model, args=args,
-        train_dataset=train_ds, eval_dataset=val_ds,
-        tokenizer=tokenizer, compute_metrics=compute_metrics,
-    )
+    # 'evaluasi tiap epoch': namanya eval_strategy (baru) atau evaluation_strategy (lama)
+    if "eval_strategy" in _TA_PARAMS:
+        kw["eval_strategy"] = "epoch"
+    elif "evaluation_strategy" in _TA_PARAMS:
+        kw["evaluation_strategy"] = "epoch"
+    if "warmup_ratio" in _TA_PARAMS:
+        kw["warmup_ratio"] = WARMUP_RATIO
+    # buang argumen apa pun yang tak dikenal versi transformers terpasang
+    kw = {k: v for k, v in kw.items() if k in _TA_PARAMS}
+    args = TrainingArguments(**kw)
+
+    # arg tokenizer di Trainer berganti nama jadi processing_class di versi baru
+    tr_kw = dict(model=model, args=args, train_dataset=train_ds,
+                 eval_dataset=val_ds, compute_metrics=compute_metrics)
+    tr_params = set(inspect.signature(Trainer.__init__).parameters)
+    if "processing_class" in tr_params:
+        tr_kw["processing_class"] = tokenizer
+    else:
+        tr_kw["tokenizer"] = tokenizer
+    return WeightedTrainer(**tr_kw)
 
 def softmax_prob1(logits):
     e = np.exp(logits - logits.max(axis=1, keepdims=True))
