@@ -8,6 +8,28 @@ sudah dianalisis (bukan tebakan).
 
 ---
 
+> ## ⚠️ UPDATE PENTING (dataset terbaru — WAJIB BACA)
+> Panitia sudah memperbarui dataset. Setelah dianalisis ulang dengan data baru,
+> ada **temuan besar yang mengubah strategi**:
+>
+> - **Dataset baru JAUH lebih sulit.** Baseline TF-IDF + overlap kata yang tadinya
+>   Macro F1 **~0.88**, di dataset baru **anjlok jadi ~0.54** (nyaris sama dengan
+>   asal-tebak "Sesuai" yang = 0.47).
+> - **Kenapa?** Di data lama, "Tidak Sesuai" = judul & isi beda topik total
+>   (overlap kata 0.34 vs 0.80 → gampang dibedakan). Di **data baru**, judul & isi
+>   **topiknya sama, kata-katanya mirip** (overlap 0.75 vs 0.80 → hampir sama!).
+>   Yang beda adalah **FAKTA-nya**: nama orang, lokasi, jabatan, atau angka di
+>   judul **tidak cocok** dengan isi.
+>   - Contoh label 0 baru: judul *"Wagub **Jabar** Ancam Denda **Rp100 Juta**..."*
+>     tapi isi bilang *"Wakil Gubernur **DKI** Jakarta... denda **dua kali lipat**"*
+>     → topik sama (denda pelanggaran prokes), tapi **lokasi & angka beda**.
+> - **Konsekuensi strategi:** fitur leksikal (overlap kata/angka/TF-IDF cosine)
+>   **tidak lagi cukup**. Untuk menang, arah utama harus ke **pemahaman makna &
+>   konsistensi fakta** → **fine-tune IndoBERT sebagai pair classification**
+>   (judul vs isi). Lihat Bagian 5 (sudah diperbarui) & Bagian 7.
+> - Baseline tetap berguna sebagai **pembanding "lower bound"** di makalah
+>   (tunjukkan kenapa pendekatan leksikal gagal → itu justru analisis bernilai).
+
 ## 0. Ringkasan super singkat (baca ini dulu)
 
 - **Jenis lomba:** klasifikasi teks. Tugasnya: menebak apakah **JUDUL berita
@@ -31,9 +53,13 @@ Dataset ada 3 file (di dalam `penyisihan-dac-ifest-2026 (2).zip`):
 
 | File | Baris | Kolom | Fungsi |
 |------|-------|-------|--------|
-| `train.csv` | 14.400 | `id, title, content, label` | data untuk melatih model (ada jawaban `label`) |
-| `test.csv` | 3.600 | `id, title, content` | data untuk diprediksi (TIDAK ada `label`) |
-| `sample_submission.csv` | 3.600 | `id, label` | contoh format jawaban yang diunggah ke Kaggle |
+| `train.csv` | 14.397 | `id, title, content, label` | data untuk melatih model (ada jawaban `label`) |
+| `test.csv` | 3.603 | `id, title, content` | data untuk diprediksi (TIDAK ada `label`) |
+| `sample_submission.csv` | 3.603 | `id, label` | contoh format jawaban yang diunggah ke Kaggle |
+
+> **Catatan:** `id` sekarang berupa teks (`tr…` untuk train, `te00000`–`te03602`
+> untuk test), bukan angka. Jumlah `test.csv` = `sample_submission.csv` = 3.603
+> (sudah cocok). Script sudah dibuat memetakan prediksi berdasarkan `id`.
 
 **Arti kolom:**
 - `title` = judul berita (rata-rata ~10 kata).
@@ -57,21 +83,23 @@ Dataset ada 3 file (di dalam `penyisihan-dac-ifest-2026 (2).zip`):
      oversampling, atau threshold tuning). Ini poin nilai di kriteria EDA &
      Prapemrosesan (25%).
 
-3. **Sinyal paling kuat = seberapa banyak kata di judul muncul di isi**
-   ("word overlap ratio"):
-   - label 0 (Tidak Sesuai): rata-rata overlap **0.34**
-   - label 1 (Sesuai): rata-rata overlap **0.80**
-   - Artinya: kalau banyak kata judul muncul di isi → cenderung "Sesuai".
-     Ini fitur emas, tapi **hati-hati**: kadang topik sama tapi peristiwanya
-     beda (angka/tanggal/tokoh beda) → tetap "Tidak Sesuai". Itulah tantangan
-     utama lomba ini.
+3. **Fitur leksikal TIDAK lagi memisahkan kelas (ini kunci dataset baru!):**
+   - word overlap ratio: label 0 = **0.75** vs label 1 = **0.80** (nyaris sama)
+   - overlap angka: label 0 = **0.955** vs label 1 = **0.960** (nyaris sama)
+   - overlap kata berkapital (proxy nama/tempat): 0.339 vs 0.385 (lemah)
+   - **Artinya:** kalian **tidak bisa** menang hanya dengan menghitung kesamaan
+     kata/angka. Judul & isi yang "Tidak Sesuai" pun topik & kosakatanya mirip.
+     Perbedaannya ada di **detail fakta** (siapa/di mana/berapa) → butuh model
+     yang memahami **makna**, bukan sekadar mencocokkan kata.
 
-4. **Contoh nyata label 0 (Tidak Sesuai):**
-   - Judul: *"IDI Sebut Ruang ICU Khusus Covid-19 di Surabaya Sudah Penuh"*
-   - Isi: *"Pemerintah Afrika Selatan menunda dimulainya tahun ajaran baru..."*
-   - → Judul ngomong ICU Surabaya, isinya soal sekolah di Afrika Selatan.
-     Jelas tidak nyambung. Model harus bisa menangkap perbedaan **topik/entitas**
-     seperti ini.
+4. **Contoh nyata label 0 (Tidak Sesuai) di dataset baru:**
+   - Judul: *"Wagub **Jabar** Ancam Denda **Rp100 Juta** Bila Rizieq Melanggar"*
+   - Isi: *"Wakil Gubernur **DKI Jakarta** Ahmad Riza Patria... denda **dua kali
+     lipat**..."*
+   - → Topik sama (sanksi pelanggaran prokes Rizieq), banyak kata sama, tapi
+     **lokasi (Jabar vs DKI) & angka (Rp100 juta vs 2x lipat) BEDA**. Inilah
+     "misleading headline" yang harus dideteksi model — jauh lebih halus
+     daripada dataset versi lama.
 
 > **Catatan metrik:** baseline mengasumsikan metriknya **Macro F1**. Sebelum
 > mulai, buka halaman Kaggle "Overview → Evaluation" dan **pastikan metrik
@@ -134,46 +162,56 @@ python3 baseline/eda.py
 python3 baseline/baseline_model.py
 ```
 
-**Skor baseline (validasi hold-out 80/20, seed=42):**
-- Macro F1 @ threshold 0.5   : **~0.855**
-- Macro F1 @ threshold optimal (0.18) : **~0.883**
+**Skor baseline di DATASET BARU (validasi hold-out 80/20, seed=42):**
+- Macro F1 @ threshold 0.5   : **~0.52**
+- Macro F1 @ threshold optimal : **~0.54**
+- (bandingkan: asal-tebak "Sesuai" terus = **0.47**)
 
-Threshold 0.18 (bukan 0.5) dipakai karena data imbalance — kita perlu lebih
-"peka" mendeteksi kelas minoritas (0).
+Jadi di dataset baru, baseline leksikal ini **hampir tidak berguna** — hanya
+sedikit di atas tebakan buta. Ini **bukti** (yang bagus untuk ditulis di
+makalah) bahwa masalahnya butuh pendekatan semantik, bukan leksikal.
+Baseline ini tetap dipakai sebagai **titik pembanding (lower bound)**.
 
 ---
 
-## 5. Cara Mengembangkan (dari baseline → skor lebih tinggi)
+## 5. Cara Mengembangkan (STRATEGI DIREVISI untuk dataset baru)
 
-Kerjakan berurutan, dari yang paling mudah & berdampak:
+Karena fitur leksikal sudah terbukti lemah (Bagian 1 & 4), **prioritas utama
+kalian adalah pendekatan semantik (IndoBERT).** Urutan di bawah sudah diurut
+ulang sesuai dampaknya di dataset baru.
 
-**Level 1 — wajib & mudah (rapikan baseline):**
-- Ganti validasi hold-out 80/20 → **StratifiedKFold (5 fold)** supaya skor
-  yang dilaporkan stabil. (Sudah di-import di `baseline_model.py`, tinggal
-  dipakai.) Ini juga nilai plus di kriteria "Metodologi".
-- Tambah preprocessing Bahasa Indonesia: **Sastrawi** (stopword removal +
-  stemming). Uji apakah menaikkan Macro F1.
-- Coba fitur TF-IDF **char n-gram** (menangkap typo & imbuhan) selain word.
+**Level 1 — jalankan baseline sebagai pembanding (cepat, wajib):**
+- Jalankan `baseline_model.py` → dapat submission valid + skor lower bound (~0.54).
+- Ganti validasi hold-out 80/20 → **StratifiedKFold (5 fold)** agar skor stabil.
+- Di makalah: tulis bahwa pendekatan leksikal **gagal** & jelaskan kenapa
+  (overlap kelas 0 vs 1 hampir sama). Ini analisis bernilai, bukan kegagalan.
 
-**Level 2 — coba model lain (bandingkan, jangan cuma 1):**
-- **SVM (LinearSVC)**, **XGBoost**, atau **LightGBM** di atas fitur yang sama.
-- Buat tabel perbandingan Macro F1 antar model di makalah (juri suka ini).
-- Catatan: **AutoML DILARANG**. Jadi pilih & tuning model manual.
+**Level 2 — PRIORITAS UTAMA: fine-tune IndoBERT (pair classification):**
+- Ini pendekatan yang paling mungkin menang di dataset baru.
+- Input: `judul [SEP] isi` → output 0/1. Model belajar apakah isi **mendukung
+  fakta** yang diklaim judul (mirip tugas NLI / entailment).
+- Model open-weight yang boleh dipakai: **IndoBERT**
+  (`indobenchmark/indobert-base-p1`) atau **IndoBERT-large**. Pakai library
+  HuggingFace `transformers` + `Trainer`.
+- Butuh GPU → **Google Colab gratis** (T4). 2–3 epoch biasanya cukup.
+- WAJIB: set `seed`, pakai `class_weight`/weighted loss atau oversampling
+  untuk imbalance 90/10, dan **StratifiedKFold** untuk melaporkan skor.
+- Karena isi bisa panjang (>300 kata) dan BERT batasnya 512 token, coba juga:
+  ambil judul penuh + potongan awal isi (biasanya fakta utama ada di awal).
 
-**Level 3 — semantic (paling ampuh untuk teks, butuh sedikit effort):**
-- Pakai **sentence embeddings** untuk mengukur kemiripan MAKNA judul vs isi
-  (bukan sekadar kata sama). Contoh model open-weight (boleh dipakai sesuai
-  aturan): **IndoBERT** (`indobenchmark/indobert-base-p1`) atau
-  Sentence-Transformers multilingual. Hitung cosine similarity embedding
-  judul vs isi → jadikan fitur tambahan.
-- Level tertinggi: **fine-tune IndoBERT** sebagai *pair classification*
-  (input: judul + [SEP] + isi → 0/1). Butuh GPU → pakai **Google Colab gratis**.
-  Ini biasanya memberi skor terbaik.
+**Level 3 — fitur "konsistensi fakta" (untuk model klasik / gabungan):**
+- Kalau belum bisa BERT, buat fitur yang menandai **ketidakcocokan fakta**:
+  - selisih **entitas** (nama orang/lokasi/lembaga) judul vs isi → pakai NER
+    Bahasa Indonesia (mis. model `cahya/…` atau spaCy/Stanza) — lebih akurat
+    daripada sekadar kata berkapital.
+  - selisih **angka & satuan** (Rp, juta, ribu, tanggal) judul vs isi.
+  - embedding similarity judul vs isi (IndoBERT/SBERT) sebagai 1 fitur numerik.
+- Masukkan fitur ini ke **SVM / XGBoost / LightGBM** (AutoML tetap DILARANG).
 
 **Level 4 — analisis error (nilai "Analisis & Interpretasi" 25%):**
-- Lihat contoh yang salah diprediksi. Polanya apa? (topik sama tokoh beda?
-  angka beda? judul terlalu pendek?) Tulis temuan ini di makalah — ini yang
-  membedakan tim juara dari tim biasa.
+- Lihat contoh yang salah diprediksi. Polanya apa? (entitas beda? angka beda?
+  bagian isi yang relevan ada di akhir sehingga terpotong?) Tulis temuan ini di
+  makalah — ini yang membedakan tim juara dari tim biasa.
 
 > **Aturan yang WAJIB dipatuhi (dari guidebook):**
 > - **Seed wajib** di-set untuk semua randomness (sudah: `SEED=42`).
