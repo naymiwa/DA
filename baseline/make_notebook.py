@@ -63,11 +63,22 @@ Teknik penting yang dipakai:
 # ---------------------------------------------------------------------------
 md(r"""## 1. Setup — install & import
 Jalankan di **Google Colab** (Runtime → Change runtime type → **GPU T4**) atau
-**Kaggle Notebook** (Settings → Accelerator → GPU).""")
+**Kaggle Notebook** (Settings → Accelerator → GPU).
+
+> **PENTING — jangan utak-atik numpy/pandas!** Colab & Kaggle sudah menyertakan
+> `torch`, `numpy`, `pandas`, `scikit-learn` versi yang saling kompatibel.
+> Cukup pasang `transformers` + `accelerate`. **Menurunkan `numpy<2.0` /
+> `pandas` akan MERUSAK environment** (muncul error seperti
+> `cannot import name '_slice' from numpy._core.umath`).
+>
+> **Kalau environment sudah terlanjur rusak:** klik menu **Runtime → Restart
+> session** (Kaggle: **Run → Restart & clear cell outputs**), lalu jalankan
+> ulang dari sel ini — dengan versi asli numpy/pandas bawaan (jangan diubah).""")
 
 code(r"""
-# Colab biasanya sudah ada torch. Kita pasang/upgrade transformers & tools.
-!pip -q install -U "transformers>=4.40" "accelerate>=0.30" scikit-learn pandas numpy
+# Colab/Kaggle SUDAH punya torch, numpy, pandas, scikit-learn yang kompatibel.
+# Cukup pasang transformers + accelerate. JANGAN reinstall/downgrade numpy/pandas.
+!pip -q install -U "transformers>=4.40" "accelerate>=0.30"
 """)
 
 code(r"""
